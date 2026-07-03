@@ -1,9 +1,10 @@
 # launcher.py
-# BehaviorMonitor - Engine Launcher
+# AnalytX - Engine Launcher
 # Responsible for starting and stopping monitor_engine.exe as a subprocess,
 # passing the correct target exe path and working directory as arguments.
 # Also manages the lifecycle of the Pipeline once the engine is running.
 
+import logging
 import os
 import sys
 import subprocess
@@ -103,6 +104,16 @@ class Launcher:
         """
         if self._running:
             return False, "A monitoring session is already running."
+
+        # ── Check admin privileges ────────────
+        if not is_admin():
+            return False, (
+                "Administrator privileges required.\n\n"
+                "AnalytX uses ETW (Event Tracing for Windows) which requires "
+                "elevated privileges.\n\n"
+                "Please restart AnalytX as Administrator:\n"
+                "  Right-click → Run as Administrator"
+            )
 
         # ── Validate inputs ───────────────────
         ok, err = self._validate_target(target_path)
@@ -216,22 +227,41 @@ class Launcher:
     #  Internal: Engine Subprocess
     # ─────────────────────────────────────────
 
+    def _kill_stale_engines(self) -> None:
+        """Kill any leftover monitor_engine.exe processes from previous sessions.
+        A stale engine holds the named pipe open, causing CreateNamedPipeW
+        to fail with ERROR_PIPE_BUSY when starting a new session."""
+        try:
+            result = subprocess.run(
+                ["taskkill", "/F", "/IM", "monitor_engine.exe"],
+                capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            if result.returncode == 0:
+                logging.info("[LAUNCHER] Killed stale monitor_engine.exe process(es).")
+                time.sleep(0.3)  # Allow OS to release pipe handles
+        except Exception:
+            pass  # taskkill fails if no matching process exists — that's fine
+
     def _start_engine(self) -> tuple[bool, str]:
         """
         Launch monitor_engine.exe as a hidden subprocess.
         Arguments passed: <target_path> <working_dir>
         """
         try:
+            # Clean up any orphaned engine processes from crashed sessions
+            self._kill_stale_engines()
+
             cmd = [
                 os.path.normpath(ENGINE_PATH),
                 os.path.normpath(self._target_path),
                 os.path.normpath(self._working_dir),
-                "\\\\.\\pipe\\BehaviorMonitorPipe"
+                r"\\.\pipe\BehaviorMonitorPipe"
             ]
 
             self._status(f"Launching engine: {' '.join(cmd)}")
 
-            print(f"[DEBUG] CMD: {cmd}")
+            logging.info(f"[DEBUG] CMD: {cmd}")
 
             # CREATE_NO_WINDOW hides the engine's console from the user
             self._engine_process = subprocess.Popen(
@@ -284,7 +314,7 @@ class Launcher:
             self._status(f"Engine process stopped. Exit code: {self._engine_process.returncode}")
 
         except Exception as e:
-            print(f"[LAUNCHER] Error stopping engine: {e}")
+            logging.error(f"[LAUNCHER] Error stopping engine: {e}")
         finally:
             self._engine_process = None
 
@@ -297,7 +327,7 @@ class Launcher:
             for line in iter(self._engine_process.stdout.readline, b""):
                 decoded = line.decode("utf-8", errors="replace").strip()
                 if decoded:
-                    print(f"[ENGINE] {decoded}")
+                    logging.info(f"[ENGINE] {decoded}")
         except Exception:
             pass
 
@@ -307,12 +337,28 @@ class Launcher:
 
     def _status(self, message: str) -> None:
         """Send a status message to the registered callback and also print it."""
-        print(f"[LAUNCHER] {message}")
+        logging.info(f"[LAUNCHER] {message}")
         if self._status_callback:
             try:
                 self._status_callback(message)
             except Exception as e:
-                print(f"[LAUNCHER] Status callback error: {e}")
+                logging.error(f"[LAUNCHER] Status callback error: {e}")
+
+
+# ─────────────────────────────────────────────
+#  Utility: Admin Check
+# ─────────────────────────────────────────────
+
+def is_admin() -> bool:
+    """
+    Check if the current process has Administrator privileges.
+    Required because ETW kernel providers only work when elevated.
+    """
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
 
 
 # ─────────────────────────────────────────────
@@ -344,7 +390,7 @@ def get_running_processes() -> list[dict]:
                     continue
                 processes.append({"pid": pid, "name": name, "path": ""})
     except Exception as e:
-        print(f"[LAUNCHER] get_running_processes error: {e}")
+        logging.error(f"[LAUNCHER] get_running_processes error: {e}")
     return processes
 
 
@@ -353,16 +399,16 @@ def get_running_processes() -> list[dict]:
 # ─────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("[TEST] Launcher self-test")
-    print(f"[TEST] Engine path resolved to: {ENGINE_PATH}")
-    print(f"[TEST] Engine exists: {os.path.isfile(ENGINE_PATH)}")
-    print(f"[TEST] Data base dir: {DATA_BASE_DIR}")
+    logging.info("[TEST] Launcher self-test")
+    logging.info(f"[TEST] Engine path resolved to: {ENGINE_PATH}")
+    logging.info(f"[TEST] Engine exists: {os.path.isfile(ENGINE_PATH)}")
+    logging.info(f"[TEST] Data base dir: {DATA_BASE_DIR}")
 
-    print("\n[TEST] Running processes (first 5):")
+    logging.info("\n[TEST] Running processes (first 5):")
     procs = get_running_processes()
     for p in procs[:5]:
-        print(f"  PID={p['pid']}  NAME={p['name']}")
+        logging.info(f"  PID={p['pid']}  NAME={p['name']}")
 
-    print("\n[TEST] To test full launch, call:")
-    print("  launcher = Launcher()")
-    print("  ok, err = launcher.start('C:\\\\path\\\\to\\\\app.exe')")
+    logging.info("\n[TEST] To test full launch, call:")
+    logging.info("  launcher = Launcher()")
+    logging.info("  ok, err = launcher.start('C:\\\\path\\\\to\\\\app.exe')")

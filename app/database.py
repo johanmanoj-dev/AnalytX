@@ -1,8 +1,9 @@
 # database.py
-# BehaviorMonitor - Database Handler
+# AnalytX - Database Handler
 # Creates and manages the SQLite database for storing monitored events.
 # Used by pipeline.py (writing) and ui.py / reporter.py (reading)
 
+import logging
 import sqlite3
 import os
 from datetime import datetime
@@ -129,7 +130,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_process_pid    ON process_events(pid)")
 
     conn.commit()
-    print("[DB] Tables created successfully.")
+    logging.info("[DB] Tables created successfully.")
 
 
 # ─────────────────────────────────────────────
@@ -164,7 +165,6 @@ def insert_file_event(conn: sqlite3.Connection, timestamp: str, pid: int,
         INSERT INTO file_events (timestamp, pid, operation, file_path, io_size)
         VALUES (?, ?, ?, ?, ?)
     """, (timestamp, pid, operation, file_path, io_size))
-    conn.commit()
 
 
 def insert_network_event(conn: sqlite3.Connection, timestamp: str, pid: int,
@@ -174,7 +174,6 @@ def insert_network_event(conn: sqlite3.Connection, timestamp: str, pid: int,
         INSERT INTO network_events (timestamp, pid, operation, detail, dst_ip, dst_port, size)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (timestamp, pid, operation, detail, dst_ip, dst_port, size))
-    conn.commit()
 
 
 def insert_process_event(conn: sqlite3.Connection, timestamp: str, pid: int,
@@ -185,7 +184,6 @@ def insert_process_event(conn: sqlite3.Connection, timestamp: str, pid: int,
         INSERT INTO process_events (timestamp, pid, operation, detail, child_pid, parent_pid, exit_code)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (timestamp, pid, operation, detail, child_pid, parent_pid, exit_code))
-    conn.commit()
 
 
 def insert_control_event(conn: sqlite3.Connection, timestamp: str,
@@ -194,6 +192,9 @@ def insert_control_event(conn: sqlite3.Connection, timestamp: str,
         INSERT INTO control_events (timestamp, operation, pid, detail)
         VALUES (?, ?, ?, ?)
     """, (timestamp, operation, pid, detail))
+
+def commit(conn: sqlite3.Connection) -> None:
+    """Commit the transaction for batch updates."""
     conn.commit()
 
 
@@ -325,7 +326,7 @@ def get_unique_files(conn: sqlite3.Connection) -> list:
 if __name__ == "__main__":
     import tempfile
 
-    print("[TEST] Running database self-test...")
+    logging.info("[TEST] Running database self-test...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = get_db_path(tmpdir)
@@ -347,21 +348,21 @@ if __name__ == "__main__":
 
         # Query and print
         stats = get_summary_stats(conn)
-        print(f"[TEST] Stats: {stats}")
+        logging.info(f"[TEST] Stats: {stats}")
 
         file_events = get_file_events(conn)
-        print(f"[TEST] File events: {[dict(r) for r in file_events]}")
+        logging.info(f"[TEST] File events: {[dict(r) for r in file_events]}")
 
         net_events = get_network_events(conn)
-        print(f"[TEST] Network events: {[dict(r) for r in net_events]}")
+        logging.info(f"[TEST] Network events: {[dict(r) for r in net_events]}")
 
         combined = get_all_events_combined(conn)
-        print(f"[TEST] Combined events: {len(combined)} rows")
+        logging.info(f"[TEST] Combined events: {len(combined)} rows")
 
         update_session_stopped(conn)
         session = get_session_info(conn)
-        print(f"[TEST] Session status: {session['status']}")
+        logging.info(f"[TEST] Session status: {session['status']}")
 
         conn.close()
 
-    print("[TEST] All tests passed!")
+    logging.info("[TEST] All tests passed!")

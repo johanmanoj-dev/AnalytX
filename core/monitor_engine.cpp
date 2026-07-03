@@ -1,5 +1,5 @@
 // monitor_engine.cpp
-// Core monitoring engine for BehaviorMonitor
+// Core monitoring engine for AnalytX
 // Handles: CreateProcess (with correct working dir), ETW session, Named Pipe output
 //
 // Build: See build.bat
@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sddl.h>
 
 #pragma comment(lib, "tdh.lib")
 #pragma comment(lib, "advapi32.lib")
@@ -525,6 +526,21 @@ static BOOL LaunchTarget(
 // ─────────────────────────────────────────────
 
 static BOOL SetupPipe(const wchar_t* pipeName) {
+    SECURITY_ATTRIBUTES sa;
+    ZeroMemory(&sa, sizeof(sa));
+    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sa.bInheritHandle = FALSE;
+
+    // SDDL: Generic All to Built-in Administrators (BA) and Owner (OW)
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorA(
+            "D:(A;;GA;;;BA)(A;;GA;;;OW)",
+            SDDL_REVISION_1,
+            &sa.lpSecurityDescriptor,
+            NULL)) {
+        fprintf(stderr, "[Engine] Failed to create security descriptor: %lu\n", GetLastError());
+        return FALSE;
+    }
+
     g_hPipe = CreateNamedPipeW(
         pipeName,
         PIPE_ACCESS_OUTBOUND,
@@ -533,8 +549,10 @@ static BOOL SetupPipe(const wchar_t* pipeName) {
         PIPE_BUFFER_SIZE,
         PIPE_BUFFER_SIZE,
         0,
-        NULL
+        &sa
     );
+
+    LocalFree(sa.lpSecurityDescriptor);
 
     if (g_hPipe == INVALID_HANDLE_VALUE) {
         fprintf(stderr, "[Engine] CreateNamedPipe failed: %lu\n", GetLastError());
@@ -608,7 +626,7 @@ int wmain(int argc, wchar_t* argv[]) {
     const wchar_t* workingDir = argv[2];
     const wchar_t* pipeName   = argv[3];
 
-    fprintf(stdout, "[Engine] BehaviorMonitor Engine v1.0 starting...\n");
+    fprintf(stdout, "[Engine] AnalytX Engine v1.0 starting...\n");
     fflush(stdout);
 
     if (!PathFileExistsW(exePath)) {

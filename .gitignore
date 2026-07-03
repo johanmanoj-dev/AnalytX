@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# C++ build artifacts
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# IDE
+.vs/
+.vscode/
+*.suo
+*.user
+
+# Runtime data (sessions accumulate and should not be in git)
+data/sessions/
+logs/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

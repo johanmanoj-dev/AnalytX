@@ -1,8 +1,9 @@
 # reporter.py
-# BehaviorMonitor - Report Generator
+# AnalytX - Report Generator
 # Reads the completed session SQLite database and generates
 # a clean, self-contained HTML report summarizing all monitored activity.
 
+import logging
 import os
 import sqlite3
 from datetime import datetime
@@ -22,7 +23,7 @@ class Reporter:
     Usage:
         reporter = Reporter(db_path="path/to/events.db")
         output_path = reporter.generate()
-        print(f"Report saved to: {output_path}")
+        logging.info(f"Report saved to: {output_path}")
     """
 
     def __init__(self, db_path: str, output_path: str = None):
@@ -64,7 +65,7 @@ class Reporter:
         with open(self.output_path, "w", encoding="utf-8") as f:
             f.write(html)
 
-        print(f"[REPORTER] Report saved to: {self.output_path}")
+        logging.info(f"[REPORTER] Report saved to: {self.output_path}")
         return self.output_path
 
     # ─────────────────────────────────────────
@@ -88,7 +89,7 @@ class Reporter:
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>BehaviorMonitor Report</title>
+<title>AnalytX — Behavior Report</title>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 
@@ -294,7 +295,7 @@ class Reporter:
 </head>
 <body>
 
-<h1>BehaviorMonitor Report</h1>
+<h1>AnalytX — Behavior Report</h1>
 <p class="subtitle">Generated {generated_at}</p>
 
 <!-- Session Info -->
@@ -369,7 +370,7 @@ class Reporter:
 {self._build_process_table(proc_events)}
 
 <div class="footer">
-  BehaviorMonitor &nbsp;|&nbsp; Report generated {generated_at}
+  AnalytX &nbsp;|&nbsp; Report generated {generated_at}
 </div>
 
 </body>
@@ -545,7 +546,7 @@ def generate_report(db_path: str, output_path: str = None) -> str:
 if __name__ == "__main__":
     import tempfile
 
-    print("[TEST] Reporter self-test...")
+    logging.info("[TEST] Reporter self-test...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = db.get_db_path(tmpdir)
@@ -576,12 +577,12 @@ if __name__ == "__main__":
         report_path = os.path.join(tmpdir, "report.html")
         saved_path  = generate_report(db_path, report_path)
 
-        print(f"[TEST] Report generated: {saved_path}")
-        print(f"[TEST] File size: {os.path.getsize(saved_path)} bytes")
-        print("[TEST] Open the file in a browser to preview it.")
+        logging.info(f"[TEST] Report generated: {saved_path}")
+        logging.info(f"[TEST] File size: {os.path.getsize(saved_path)} bytes")
+        logging.info("[TEST] Open the file in a browser to preview it.")
 
         # Copy to cwd for easy viewing
         import shutil
         local_copy = os.path.join(os.getcwd(), "test_report.html")
         shutil.copy(saved_path, local_copy)
-        print(f"[TEST] Copied to: {local_copy}")
+        logging.info(f"[TEST] Copied to: {local_copy}")

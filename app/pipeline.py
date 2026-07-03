@@ -1,10 +1,12 @@
 # pipeline.py
-# BehaviorMonitor - Event Pipeline
+# AnalytX - Event Pipeline
 # Connects to the named pipe output of monitor_engine.exe,
-# reads newline-delimited JSON events, and writes them to SQLite
+# reads newline-delimited JSON events, translates the C++ engine's
+# JSON schema to the Python schema, and writes them to SQLite
 # via database.py. Runs on its own thread so the UI stays responsive.
 
 import json
+import logging
 import threading
 import time
 import os
@@ -60,8 +62,12 @@ class Pipeline:
             "process_events": 0,
             "control_events": 0,
             "parse_errors":   0,
+            "total_events":   0
         }
-
+        
+        # Batching state
+        self.uncommitted_events = 0
+        self.last_commit_time = time.time()
     # ─────────────────────────────────────────
     #  Public API
     # ─────────────────────────────────────────
@@ -77,7 +83,7 @@ class Pipeline:
     def start(self) -> None:
         """Start the pipeline background thread."""
         if self._running:
-            print("[PIPELINE] Already running.")
+            logging.info("[PIPELINE] Already running.")
             return
 
         # Open DB connection
@@ -90,11 +96,11 @@ class Pipeline:
             daemon=True         # dies automatically if main process exits
         )
         self._thread.start()
-        print("[PIPELINE] Started.")
+        logging.info("[PIPELINE] Started.")
 
     def stop(self) -> None:
         """Signal the pipeline to stop and wait for the thread to finish."""
-        print("[PIPELINE] Stopping...")
+        logging.info("[PIPELINE] Stopping...")
         self._running = False
 
         # Unblock the pipe read by closing the handle
@@ -107,12 +113,15 @@ class Pipeline:
         if self.conn:
             try:
                 db.update_session_stopped(self.conn)
-            except Exception:
-                pass
+                # Final flush
+                if self.uncommitted_events > 0:
+                    db.commit(self.conn)
+            except Exception as e:
+                logging.error(f"[PIPELINE] Stop DB update error: {e}")
             self.conn.close()
             self.conn = None
 
-        print("[PIPELINE] Stopped.")
+        logging.info("[PIPELINE] Stopped.")
 
     def is_running(self) -> bool:
         return self._running
@@ -148,11 +157,11 @@ class Pipeline:
                 return False
 
             self._pipe_handle = handle
-            print(f"[PIPELINE] Connected to pipe: {PIPE_NAME}")
+            logging.info(f"[PIPELINE] Connected to pipe: {PIPE_NAME}")
             return True
 
         except Exception as e:
-            print(f"[PIPELINE] Pipe connect error: {e}")
+            logging.error(f"[PIPELINE] Pipe connect error: {e}")
             return False
 
     def _close_pipe(self) -> None:
@@ -192,7 +201,7 @@ class Pipeline:
             return buf.raw[:bytes_read.value]
 
         except Exception as e:
-            print(f"[PIPELINE] Read error: {e}")
+            logging.error(f"[PIPELINE] Read error: {e}")
             return None
 
     # ─────────────────────────────────────────
@@ -211,7 +220,7 @@ class Pipeline:
         """
 
         # Wait for the engine to create the pipe
-        print("[PIPELINE] Waiting for monitor_engine pipe...")
+        logging.info("[PIPELINE] Waiting for monitor_engine pipe...")
         while self._running:
             if self._connect_pipe():
                 break
@@ -220,14 +229,14 @@ class Pipeline:
         if not self._running:
             return
 
-        print("[PIPELINE] Reading events...")
+        logging.info("[PIPELINE] Reading events...")
 
         while self._running:
             chunk = self._read_pipe_chunk()
 
             if chunk is None:
                 # Pipe closed — engine has shut down
-                print("[PIPELINE] Pipe closed by engine.")
+                logging.info("[PIPELINE] Pipe closed by engine.")
                 self._running = False
                 break
 
@@ -250,7 +259,16 @@ class Pipeline:
                 if line:
                     self._process_line(line)
 
-        print("[PIPELINE] Read loop exited.")
+        # Ensure any remaining events are committed when loop exits
+        with self._lock:
+            if self.conn and self.uncommitted_events > 0:
+                try:
+                    db.commit(self.conn)
+                    self.uncommitted_events = 0
+                except:
+                    pass
+
+        logging.info("[PIPELINE] Read loop exited.")
 
     # ─────────────────────────────────────────
     #  Internal: Parse and route one JSON line
@@ -261,42 +279,192 @@ class Pipeline:
         try:
             event = json.loads(line)
         except json.JSONDecodeError as e:
-            print(f"[PIPELINE] JSON parse error: {e} | Line: {line[:80]}")
+            logging.error(f"[PIPELINE] JSON parse error: {e} | Line: {line[:80]}")
             self.stats["parse_errors"] += 1
             return
 
-        category  = event.get("category", "")
-        operation = event.get("operation", "")
-        pid       = event.get("pid", 0)
-        detail    = event.get("detail", "")
-        timestamp = event.get("timestamp", datetime.now().isoformat())
+        # ── Translate engine JSON → normalized Python schema ──
+        # The C++ engine uses different field names than the Python
+        # handlers expect. This translation layer bridges the gap.
+        category, normalized = self._translate_event(event)
+
+        if category is None:
+            return  # Unknown or unhandled event type
+
+        timestamp = normalized.get("timestamp", datetime.now().isoformat())
+        operation = normalized.get("operation", "")
+        pid       = normalized.get("pid", 0)
+        detail    = normalized.get("detail", "")
 
         try:
             if category == "file":
-                self._handle_file(event, timestamp, pid, operation, detail)
+                self._handle_file(normalized, timestamp, pid, operation, detail)
 
             elif category == "network":
-                self._handle_network(event, timestamp, pid, operation, detail)
+                self._handle_network(normalized, timestamp, pid, operation, detail)
 
             elif category == "process":
-                self._handle_process(event, timestamp, pid, operation, detail)
+                self._handle_process(normalized, timestamp, pid, operation, detail)
 
             elif category == "control":
-                self._handle_control(event, timestamp, pid, operation, detail)
+                self._handle_control(normalized, timestamp, pid, operation, detail)
 
-            else:
-                print(f"[PIPELINE] Unknown category: {category}")
-                return
+            # Check if we need to commit
+            self.uncommitted_events += 1
+            now = time.time()
+            if self.uncommitted_events >= 100 or now - self.last_commit_time >= 0.5:
+                db.commit(self.conn)
+                self.uncommitted_events = 0
+                self.last_commit_time = now
 
-            # Fire UI callback on the event (non-blocking)
+            # Fire UI callback with the normalized event (non-blocking)
             if self._event_callback:
                 try:
-                    self._event_callback(category, event)
+                    self._event_callback(category, normalized)
                 except Exception as cb_err:
-                    print(f"[PIPELINE] Callback error: {cb_err}")
+                    logging.error(f"[PIPELINE] Callback error: {cb_err}")
 
         except Exception as insert_err:
-            print(f"[PIPELINE] DB insert error: {insert_err} | Event: {event}")
+            logging.error(f"[PIPELINE] DB insert error: {insert_err} | Event: {normalized}")
+
+    # ─────────────────────────────────────────
+    #  Engine JSON → Python Schema Translation
+    # ─────────────────────────────────────────
+
+    def _translate_event(self, raw: dict) -> tuple:
+        """
+        Translate the C++ engine's JSON format into the normalized
+        schema that _handle_file/network/process/control expect.
+
+        Engine sends:
+            FILE:     {"type":"FILE",    "time":"...", "pid":N, "operation":"Create", "path":"..."}
+            NETWORK:  {"type":"NETWORK", "time":"...", "pid":N, "protocol":"TCP", "direction":"Send",
+                        "src":"ip:port", "dst":"ip:port", "size":"N"}
+            PROCESS:  {"type":"PROCESS", "time":"...", "pid":N, "event":"Start|Stop|ImageLoad",
+                        "new_pid":"N", "image":"...", "cmdline":"..."}
+            LAUNCHED: {"type":"LAUNCHED","pid":N}
+            SHUTDOWN: {"type":"SHUTDOWN"}
+            CHILD_PID:{"type":"CHILD_PID","pid":N}
+
+        Returns:
+            (category: str, normalized: dict)  or  (None, None) if unrecognized.
+        """
+        event_type = raw.get("type", "").upper()
+        now_str    = datetime.now().isoformat()
+
+        # ── FILE events ──────────────────────────
+        if event_type == "FILE":
+            return "file", {
+                "timestamp": raw.get("time", now_str),
+                "pid":       raw.get("pid", 0),
+                "operation": raw.get("operation", "FileOp"),
+                "detail":    raw.get("path", "(unknown)"),
+                "io_size":   0,   # engine doesn't send IO size yet
+            }
+
+        # ── NETWORK events ───────────────────────
+        elif event_type == "NETWORK":
+            src_raw = raw.get("src", ":")
+            dst_raw = raw.get("dst", ":")
+            # Parse "ip:port" strings
+            dst_ip, dst_port = self._parse_addr(dst_raw)
+            connection_str = f"{src_raw} → {dst_raw}"
+
+            return "network", {
+                "timestamp": raw.get("time", now_str),
+                "pid":       raw.get("pid", 0),
+                "operation": raw.get("direction", "Send"),
+                "detail":    connection_str,
+                "dst_ip":    dst_ip,
+                "dst_port":  dst_port,
+                "size":      self._safe_int(raw.get("size", "0")),
+            }
+
+        # ── PROCESS events ───────────────────────
+        elif event_type == "PROCESS":
+            event_name = raw.get("event", "")
+            # Map engine event names to operation names
+            op_map = {
+                "Start":     "ChildProcessStart",
+                "Stop":      "ProcessExit",
+                "ImageLoad": "ImageLoad",
+            }
+            operation = op_map.get(event_name, event_name)
+
+            # Build detail from image name or cmdline
+            detail = raw.get("image", "")
+            if not detail:
+                detail = raw.get("cmdline", "")
+
+            return "process", {
+                "timestamp":  raw.get("time", now_str),
+                "pid":        raw.get("pid", 0),
+                "operation":  operation,
+                "detail":     detail,
+                "child_pid":  self._safe_int(raw.get("new_pid", "0")),
+                "parent_pid": raw.get("pid", 0),
+                "exit_code":  None,
+            }
+
+        # ── CONTROL events (engine lifecycle) ────
+        elif event_type == "LAUNCHED":
+            return "control", {
+                "timestamp": now_str,
+                "pid":       raw.get("pid", 0),
+                "operation": "TargetLaunched",
+                "detail":    "",
+            }
+
+        elif event_type == "SHUTDOWN":
+            return "control", {
+                "timestamp": now_str,
+                "pid":       0,
+                "operation": "EngineShutdown",
+                "detail":    "",
+            }
+
+        elif event_type == "CHILD_PID":
+            return "control", {
+                "timestamp": now_str,
+                "pid":       raw.get("pid", 0),
+                "operation": "ChildPID",
+                "detail":    f"Now tracking child PID {raw.get('pid', '?')}",
+            }
+
+        else:
+            logging.info(f"[PIPELINE] Unknown event type: {event_type}")
+            return None, None
+
+    @staticmethod
+    def _parse_addr(addr_str: str) -> tuple:
+        """Parse 'ip:port' string into (ip, port_int). Handles IPv6 [::]:port."""
+        try:
+            if addr_str.startswith("["):
+                # IPv6: [::1]:443
+                bracket_end = addr_str.rfind("]")
+                ip = addr_str[1:bracket_end]
+                port = int(addr_str[bracket_end + 2:]) if bracket_end + 2 < len(addr_str) else 0
+            elif addr_str.count(":") == 1:
+                # IPv4: 192.168.1.1:443
+                parts = addr_str.rsplit(":", 1)
+                ip = parts[0]
+                port = int(parts[1]) if parts[1] else 0
+            else:
+                # Bare IPv6 or unparseable
+                ip = addr_str
+                port = 0
+        except (ValueError, IndexError):
+            ip = addr_str
+            port = 0
+        return ip, port
+
+    @staticmethod
+    def _safe_int(val) -> int:
+        """Safely convert a string or number to int, defaulting to 0."""
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return 0
 
     # ─────────────────────────────────────────
     #  Internal: Category Handlers
@@ -365,13 +533,13 @@ class Pipeline:
 
         # Handle special control signals
         if operation == "TargetLaunched":
-            print(f"[PIPELINE] Target launched. PID={pid} | Path={detail}")
+            logging.info(f"[PIPELINE] Target launched. PID={pid} | Path={detail}")
 
         elif operation == "TargetExited":
-            print(f"[PIPELINE] Target process exited. PID={pid}")
+            logging.info(f"[PIPELINE] Target process exited. PID={pid}")
 
         elif operation == "EngineShutdown":
-            print(f"[PIPELINE] Engine shutdown received. Stopping pipeline.")
+            logging.info(f"[PIPELINE] Engine shutdown received. Stopping pipeline.")
             self._running = False
 
     # ─────────────────────────────────────────
@@ -383,7 +551,7 @@ class Pipeline:
         return dict(self.stats)
 
     def print_stats(self) -> None:
-        print(f"[PIPELINE] Stats: {self.stats}")
+        logging.info(f"[PIPELINE] Stats: {self.stats}")
 
 
 # ─────────────────────────────────────────────
@@ -395,9 +563,9 @@ class Pipeline:
 if __name__ == "__main__":
     import tempfile
 
-    print("[TEST] Pipeline self-test — will try to connect to pipe.")
-    print("[TEST] Make sure monitor_engine.exe is running first.")
-    print("[TEST] Press Ctrl+C to stop.\n")
+    logging.info("[TEST] Pipeline self-test — will try to connect to pipe.")
+    logging.info("[TEST] Make sure monitor_engine.exe is running first.")
+    logging.info("[TEST] Press Ctrl+C to stop.\n")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = db.get_db_path(tmpdir)
@@ -406,7 +574,7 @@ if __name__ == "__main__":
         conn.close()
 
         def on_event(category: str, event: dict):
-            print(f"  [{category.upper()}] {event.get('operation')} | {event.get('detail', '')[:60]}")
+            logging.info(f"  [{category.upper()}] {event.get('operation')} | {event.get('detail', '')[:60]}")
 
         pipeline = Pipeline(db_path=db_path)
         pipeline.set_event_callback(on_event)
@@ -417,8 +585,8 @@ if __name__ == "__main__":
                 time.sleep(1)
                 pipeline.print_stats()
         except KeyboardInterrupt:
-            print("\n[TEST] Interrupted by user.")
+            logging.info("\n[TEST] Interrupted by user.")
 
         pipeline.stop()
         pipeline.print_stats()
-        print("[TEST] Done.")
+        logging.info("[TEST] Done.")

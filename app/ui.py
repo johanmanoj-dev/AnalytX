@@ -5,6 +5,7 @@
 #          live event tables, autoscroll, search/filter,
 #          metric cards, export report.
 
+import logging
 import os
 import sys
 import webbrowser
@@ -19,7 +20,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QGraphicsOpacityEffect
 )
 from PyQt6.QtCore import (
-    Qt, QTimer, QThread, pyqtSignal, QSize,
+    Qt, QTimer, QThread, QObject, pyqtSignal, QSize,
     QPropertyAnimation, QEasingCurve, pyqtProperty
 )
 from PyQt6.QtGui import (
@@ -717,7 +718,7 @@ class EventTable(QTableWidget):
 #  UI Update Worker — runs on main thread via QTimer
 # ─────────────────────────────────────────────
 
-class UIUpdater(QThread):
+class UIUpdater(QObject):
     """
     Receives events from the pipeline callback (which runs on a
     background thread) and emits them safely to the main thread.
@@ -1214,7 +1215,7 @@ class MainWindow(QMainWindow):
             try:
                 rpt.generate_report(db_path)
             except Exception as e:
-                print(f"[UI] Report generation error: {e}")
+                logging.error(f"[UI] Report generation error: {e}")
 
     # ─────────────────────────────────────────
     #  Live Event Handler  (called from pipeline via signal)
@@ -1314,7 +1315,7 @@ class MainWindow(QMainWindow):
 
     def _on_status(self, message: str):
         # Could drive a status bar message — for now just print
-        print(f"[UI STATUS] {message}")
+        logging.info(f"[UI STATUS] {message}")
 
     # ─────────────────────────────────────────
     #  Search / Filter

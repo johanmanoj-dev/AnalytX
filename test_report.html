@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AnalytX — Behavior Report</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #0f1117;
+    color: #e2e8f0;
+    padding: 32px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  h1 {
+    font-size: 26px;
+    font-weight: 700;
+    color: #7dd3fc;
+    margin-bottom: 4px;
+  }
+
+  h2 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #94a3b8;
+    margin: 28px 0 12px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #1e293b;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .subtitle {
+    color: #64748b;
+    font-size: 13px;
+    margin-bottom: 28px;
+  }
+
+  /* ── Summary Cards ── */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+
+  .card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 18px 20px;
+    text-align: center;
+  }
+
+  .card .count {
+    font-size: 32px;
+    font-weight: 700;
+    color: #7dd3fc;
+    display: block;
+  }
+
+  .card .label {
+    font-size: 12px;
+    color: #94a3b8;
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  /* ── Session Info Box ── */
+  .info-box {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 18px 24px;
+    margin-bottom: 28px;
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 8px 0;
+  }
+
+  .info-box .key {
+    color: #64748b;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding-top: 2px;
+  }
+
+  .info-box .val {
+    color: #e2e8f0;
+    word-break: break-all;
+  }
+
+  /* ── Tables ── */
+  .table-wrap {
+    overflow-x: auto;
+    margin-bottom: 36px;
+    border-radius: 10px;
+    border: 1px solid #334155;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  thead tr {
+    background: #1e293b;
+  }
+
+  thead th {
+    padding: 10px 14px;
+    text-align: left;
+    color: #94a3b8;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+
+  tbody tr {
+    border-top: 1px solid #1e293b;
+    transition: background 0.1s;
+  }
+
+  tbody tr:hover {
+    background: #1e293b;
+  }
+
+  tbody td {
+    padding: 8px 14px;
+    color: #cbd5e1;
+    max-width: 480px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Badges ── */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .badge-file    { background: #1e3a5f; color: #7dd3fc; }
+  .badge-network { background: #1e3a2f; color: #6ee7b7; }
+  .badge-process { background: #3a1e3f; color: #d8b4fe; }
+  .badge-create  { background: #1e3a5f; color: #7dd3fc; }
+  .badge-write   { background: #3a2e1e; color: #fbbf24; }
+  .badge-read    { background: #1e2e3a; color: #94a3b8; }
+  .badge-delete  { background: #3a1e1e; color: #f87171; }
+  .badge-connect { background: #1e3a2f; color: #6ee7b7; }
+  .badge-send    { background: #1e3a2f; color: #34d399; }
+  .badge-receive { background: #1e2e3a; color: #60a5fa; }
+
+  .pid {
+    font-family: monospace;
+    color: #94a3b8;
+    font-size: 12px;
+  }
+
+  .path {
+    font-family: monospace;
+    font-size: 12px;
+    color: #7dd3fc;
+  }
+
+  .ip {
+    font-family: monospace;
+    color: #6ee7b7;
+  }
+
+  .ts {
+    color: #475569;
+    font-size: 11px;
+    font-family: monospace;
+    white-space: nowrap;
+  }
+
+  .no-events {
+    padding: 24px;
+    text-align: center;
+    color: #475569;
+    font-style: italic;
+  }
+
+  /* ── Footer ── */
+  .footer {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid #1e293b;
+    color: #475569;
+    font-size: 12px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<h1>AnalytX — Behavior Report</h1>
+<p class="subtitle">Generated 2026-07-03 01:23:53</p>
+
+<!-- Session Info -->
+<h2>Session Information</h2>
+<div class="info-box">
+  <span class="key">Target</span>
+  <span class="val path">C:\TestApp\app.exe</span>
+
+  <span class="key">Working Dir</span>
+  <span class="val path">C:\TestApp\</span>
+
+  <span class="key">Root PID</span>
+  <span class="val pid">1234</span>
+
+  <span class="key">Started</span>
+  <span class="val">2026-07-03T01:23:53.613907</span>
+
+  <span class="key">Stopped</span>
+  <span class="val">2026-07-03T01:23:53.614044</span>
+
+  <span class="key">Status</span>
+  <span class="val">stopped</span>
+</div>
+
+<!-- Summary Cards -->
+<h2>Summary</h2>
+<div class="cards">
+  <div class="card">
+    <span class="count">7</span>
+    <span class="label">Total Events</span>
+  </div>
+  <div class="card">
+    <span class="count">4</span>
+    <span class="label">File Events</span>
+  </div>
+  <div class="card">
+    <span class="count">2</span>
+    <span class="label">Network Events</span>
+  </div>
+  <div class="card">
+    <span class="count">1</span>
+    <span class="label">Process Events</span>
+  </div>
+  <div class="card">
+    <span class="count">4</span>
+    <span class="label">Unique Files</span>
+  </div>
+  <div class="card">
+    <span class="count">1</span>
+    <span class="label">Unique IPs</span>
+  </div>
+</div>
+
+<!-- Unique IPs -->
+<h2>Network — Unique Destinations</h2>
+<div class="table-wrap"><table><thead><tr><th>Destination IP</th><th>Hit Count</th></tr></thead><tbody><tr><td class="ip">93.184.216.34</td><td>2</td></tr></tbody></table></div>
+
+<!-- Unique Files -->
+<h2>File System — Unique Paths Accessed</h2>
+<div class="table-wrap"><table><thead><tr><th>File Path</th><th>Access Count</th><th>Operations</th></tr></thead><tbody><tr><td class="path" title="C:\TestApp\config.ini">C:\TestApp\config.ini</td><td>1</td><td>Create</td></tr><tr><td class="path" title="C:\TestApp\data.db">C:\TestApp\data.db</td><td>1</td><td>Read</td></tr><tr><td class="path" title="C:\TestApp\log.txt">C:\TestApp\log.txt</td><td>1</td><td>Write</td></tr><tr><td class="path" title="C:\TestApp\temp.tmp">C:\TestApp\temp.tmp</td><td>1</td><td>Delete</td></tr></tbody></table></div>
+
+<!-- File Events -->
+<h2>File Events (4 shown)</h2>
+<div class="table-wrap"><table><thead><tr><th>Timestamp</th><th>PID</th><th>Operation</th><th>File Path</th><th>IO Size</th></tr></thead><tbody><tr><td class="ts">2025-02-22 10:00:03.000</td><td class="pid">1234</td><td><span class="badge badge-delete">Delete</span></td><td class="path" title="C:\TestApp\temp.tmp">C:\TestApp\temp.tmp</td><td>0</td></tr><tr><td class="ts">2025-02-22 10:00:02.000</td><td class="pid">1234</td><td><span class="badge badge-read">Read</span></td><td class="path" title="C:\TestApp\data.db">C:\TestApp\data.db</td><td>1024</td></tr><tr><td class="ts">2025-02-22 10:00:01.000</td><td class="pid">1234</td><td><span class="badge badge-write">Write</span></td><td class="path" title="C:\TestApp\log.txt">C:\TestApp\log.txt</td><td>256</td></tr><tr><td class="ts">2025-02-22 10:00:00.000</td><td class="pid">1234</td><td><span class="badge badge-create">Create</span></td><td class="path" title="C:\TestApp\config.ini">C:\TestApp\config.ini</td><td>512</td></tr></tbody></table></div>
+
+<!-- Network Events -->
+<h2>Network Events (2 shown)</h2>
+<div class="table-wrap"><table><thead><tr><th>Timestamp</th><th>PID</th><th>Operation</th><th>Detail</th><th>Dest IP</th><th>Port</th><th>Size</th></tr></thead><tbody><tr><td class="ts">2025-02-22 10:00:05.000</td><td class="pid">1234</td><td><span class="badge badge-send">Send</span></td><td title="192.168.1.5:54321 -&gt; 93.184.216.34:443">192.168.1.5:54321 -&gt; 93.184.216.34:443</td><td class="ip">93.184.216.34</td><td>443</td><td>1024</td></tr><tr><td class="ts">2025-02-22 10:00:04.000</td><td class="pid">1234</td><td><span class="badge badge-connect">Connect</span></td><td title="192.168.1.5:54321 -&gt; 93.184.216.34:443">192.168.1.5:54321 -&gt; 93.184.216.34:443</td><td class="ip">93.184.216.34</td><td>443</td><td>0</td></tr></tbody></table></div>
+
+<!-- Process Events -->
+<h2>Process Events (1 shown)</h2>
+<div class="table-wrap"><table><thead><tr><th>Timestamp</th><th>PID</th><th>Operation</th><th>Detail</th><th>Child PID</th><th>Exit Code</th></tr></thead><tbody><tr><td class="ts">2025-02-22 10:00:06.000</td><td class="pid">1234</td><td><span class="badge badge-process">ChildProcessStart</span></td><td>cmd.exe</td><td class="pid">5678</td><td></td></tr></tbody></table></div>
+
+<div class="footer">
+  AnalytX &nbsp;|&nbsp; Report generated 2026-07-03 01:23:53
+</div>
+
+</body>
+</html>

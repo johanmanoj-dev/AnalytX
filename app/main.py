@@ -1,11 +1,12 @@
 # main.py
-# BehaviorMonitor - Entry Point
+# AnalytX - Entry Point
 # This is the file the user runs to start the tool.
 # It sets up the environment, verifies dependencies,
 # and launches the PyQt6 UI.
 
 import sys
 import os
+import logging
 
 # ─────────────────────────────────────────────
 #  Path Setup — must happen before any local imports
@@ -14,7 +15,7 @@ import os
 # ─────────────────────────────────────────────
 
 APP_DIR     = os.path.dirname(os.path.abspath(__file__))   # app\
-BASE_DIR    = os.path.normpath(os.path.join(APP_DIR, "..")) # BehaviorMonitor\
+BASE_DIR    = os.path.normpath(os.path.join(APP_DIR, "..")) # AnalytX\
 CORE_DIR    = os.path.join(BASE_DIR, "core")
 DATA_DIR    = os.path.join(BASE_DIR, "data")
 SESSION_DIR = os.path.join(DATA_DIR, "sessions")
@@ -34,6 +35,29 @@ def ensure_folders() -> None:
     """Create required folders if they don't exist yet."""
     for folder in [DATA_DIR, SESSION_DIR, LOGS_DIR]:
         os.makedirs(folder, exist_ok=True)
+
+def cleanup_old_sessions(max_sessions: int = 10) -> None:
+    """Keep only the most recent sessions and delete the rest."""
+    import shutil
+    try:
+        sessions = [
+            os.path.join(SESSION_DIR, d) for d in os.listdir(SESSION_DIR)
+            if os.path.isdir(os.path.join(SESSION_DIR, d))
+        ]
+        # Sort chronologically (oldest first) based on folder name (timestamp)
+        sessions.sort()
+        
+        if len(sessions) > max_sessions:
+            to_delete = sessions[:-max_sessions]
+            for folder in to_delete:
+                try:
+                    shutil.rmtree(folder)
+                    import logging
+                    logging.info(f"[MAIN] Purged old session: {folder}")
+                except Exception as e:
+                    pass
+    except Exception:
+        pass
 
 
 # ─────────────────────────────────────────────
@@ -61,7 +85,7 @@ def check_pyqt6() -> tuple[bool, str]:
             "PyQt6 is not installed.\n\n"
             "Install it by running:\n"
             "    pip install PyQt6\n\n"
-            "Then restart BehaviorMonitor."
+            "Then restart AnalytX."
         )
 
 
@@ -82,10 +106,28 @@ def check_windows() -> tuple[bool, str]:
     """This tool is Windows only."""
     if sys.platform != "win32":
         return False, (
-            "BehaviorMonitor only supports Windows.\n"
+            "AnalytX only supports Windows.\n"
             "ETW (Event Tracing for Windows) is a Windows-only technology."
         )
     return True, ""
+
+
+def check_admin() -> tuple[bool, str]:
+    """Check if running with Administrator privileges (required for ETW)."""
+    try:
+        import ctypes
+        if ctypes.windll.shell32.IsUserAnAdmin():
+            return True, ""
+        else:
+            return False, (
+                "Administrator privileges required.\n\n"
+                "AnalytX uses ETW (Event Tracing for Windows) which requires "
+                "elevated privileges.\n\n"
+                "Please restart as Administrator:\n"
+                "  Right-click → Run as Administrator"
+            )
+    except Exception:
+        return False, "Could not verify admin privileges."
 
 
 def run_all_checks() -> list[str]:
@@ -99,6 +141,7 @@ def run_all_checks() -> list[str]:
         check_python_version,
         check_pyqt6,
         check_engine,
+        check_admin,
     ]
     for check in checks:
         ok, err = check()
@@ -117,7 +160,7 @@ def show_error_fallback(errors: list[str]) -> None:
     Show errors using Windows MessageBox via ctypes
     if PyQt6 is not available yet.
     """
-    message = "BehaviorMonitor failed to start:\n\n"
+    message = "AnalytX failed to start:\n\n"
     message += "\n\n---\n\n".join(errors)
 
     try:
@@ -125,14 +168,14 @@ def show_error_fallback(errors: list[str]) -> None:
         ctypes.windll.user32.MessageBoxW(
             0,
             message,
-            "BehaviorMonitor — Startup Error",
+            "AnalytX — Startup Error",
             0x10  # MB_ICONERROR
         )
     except Exception:
         # Last resort — print to console
-        print("[ERROR] BehaviorMonitor failed to start:")
+        logging.error("[ERROR] AnalytX failed to start:")
         for err in errors:
-            print(f"  - {err}")
+            logging.info(f"  - {err}")
 
 
 # ─────────────────────────────────────────────
@@ -159,7 +202,7 @@ def setup_logging() -> None:
             logging.StreamHandler(sys.stdout)
         ]
     )
-    print(f"[MAIN] Logging to: {log_path}")
+    logging.info(f"[MAIN] Logging to: {log_path}")
 
 
 # ─────────────────────────────────────────────
@@ -176,9 +219,9 @@ def launch_ui() -> int:
     import ui  # ui.py in the same app\ folder
 
     app = QApplication(sys.argv)
-    app.setApplicationName("BehaviorMonitor")
+    app.setApplicationName("AnalytX")
     app.setApplicationVersion("1.0.0")
-    app.setOrganizationName("BehaviorMonitor")
+    app.setOrganizationName("AnalytX")
 
     # Pass BASE_DIR to UI so it knows where everything lives
     window = ui.MainWindow(base_dir=BASE_DIR)
@@ -192,8 +235,9 @@ def launch_ui() -> int:
 # ─────────────────────────────────────────────
 
 def main() -> None:
-    # 1. Create required folders
+    # 1. Create required folders and cleanup
     ensure_folders()
+    cleanup_old_sessions()
 
     # 2. Run dependency checks before importing anything heavy
     errors = run_all_checks()
@@ -204,15 +248,15 @@ def main() -> None:
     # 3. Setup logging
     setup_logging()
 
-    print("[MAIN] BehaviorMonitor starting...")
-    print(f"[MAIN] Base dir   : {BASE_DIR}")
-    print(f"[MAIN] Engine path: {ENGINE_PATH}")
-    print(f"[MAIN] Session dir: {SESSION_DIR}")
+    logging.info("[MAIN] AnalytX starting...")
+    logging.info(f"[MAIN] Base dir   : {BASE_DIR}")
+    logging.info(f"[MAIN] Engine path: {ENGINE_PATH}")
+    logging.info(f"[MAIN] Session dir: {SESSION_DIR}")
 
     # 4. Launch UI — blocks until window is closed
     exit_code = launch_ui()
 
-    print(f"[MAIN] BehaviorMonitor exited with code {exit_code}.")
+    logging.info(f"[MAIN] AnalytX exited with code {exit_code}.")
     sys.exit(exit_code)
 
 
